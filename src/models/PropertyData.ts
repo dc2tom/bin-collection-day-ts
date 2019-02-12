@@ -1,4 +1,6 @@
-class PropertyData {
+import {BinCollectionData} from './BinCollectionData'
+
+export class PropertyData {
     addressLine1: string;
     propertyId: string;
     binCollectionData: BinCollectionData[];

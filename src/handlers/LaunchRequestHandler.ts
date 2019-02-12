@@ -4,6 +4,8 @@ import Address = services.deviceAddress.Address;
 import { DynamoDB } from "aws-sdk";
 import * as moment from 'moment';
 import * as requestPromise from 'request-promise-native'
+import { PropertyData } from '../models/PropertyData'
+import { BinCollectionData } from '../models/BinCollectionData'
 
 const PERMISSIONS: string = "['read::alexa:device:all:address']";
 
@@ -99,12 +101,13 @@ export class LaunchRequestHandler implements RequestHandler {
 
     getPropertyDataFromDatabase(addressLine1: string): PropertyData {
         let params = {
-            TableName: process.env.DYNAMODB_TABLE,
             Key: {
-              'addressLine1': {S: 'addressLine1'}
+                'addressLine1': {S: addressLine1}
             },
+            TableName: process.env.DYNAMODB_TABLE,
           };
-
+        
+        console.log('Trying database lookup using params: ' + params);
         let propertyDataToReturn: PropertyData = null;
         dynamoDB.get(params, function(err, data) {
             if (err) {

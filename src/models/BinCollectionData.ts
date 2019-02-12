@@ -1,4 +1,4 @@
-class BinCollectionData {
+export class BinCollectionData {
     collectionDay: string;
     collectionDate: string;
     binType: string;
