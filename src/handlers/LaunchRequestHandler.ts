@@ -102,24 +102,24 @@ export class LaunchRequestHandler implements RequestHandler {
     getPropertyDataFromDatabase(addressLine1: string): PropertyData {
         let params = {
             Key: {
-                'addressLine1': {S: addressLine1}
+                'addressLine1': {S: addressLine1},
             },
-            TableName: process.env.DYNAMODB_TABLE,
+            TableName: process.env.DYNAMODB_TABLE
           };
         
-        console.log('Trying database lookup using params: ' + params);
+        console.log('Trying database lookup using params: ' + JSON.stringify(params));
         let propertyDataToReturn: PropertyData = null;
         dynamoDB.get(params, function(err, data) {
             if (err) {
                 console.log("Error", err);
             } else {
-                if (data.Item.propertyId !== null) {
-                    console.log("Found propertyId in database: " + data.Item.propertyId);
+                if (data.Item.propertyId.S !== null) {
+                    console.log("Found propertyId in database: " + data.Item.propertyId.S);
                     if (data.Item.binCollectionData !== null) {
                         console.log("Found bin collection data in database.");
-                        let binCollectionDataList: BinCollectionData[] = JSON.parse(data.Item.binCollectionData);
+                        let binCollectionDataList: BinCollectionData[] = JSON.parse(data.Item.binCollectionData.S);
 
-                        propertyDataToReturn = new PropertyData(addressLine1, data.Item.propertId, binCollectionDataList);
+                        propertyDataToReturn = new PropertyData(addressLine1, data.Item.propertyId.S, binCollectionDataList);
                     }
                 }
             }
@@ -136,12 +136,12 @@ export class LaunchRequestHandler implements RequestHandler {
         console.log("Writing bin data to database.")
 
         let params = {
-            TableName: process.env.DYNAMODB_TABLE,
             Item: {
-              'addressLine1': {S: propertyData.addressLine1},
-              'propertyId': {S: propertyData.propertyId},
-              'binCollectionData': {S: JSON.stringify(propertyData.binCollectionData)}
+                'addressLine1': {S: propertyData.addressLine1},
+                'propertyId': {S: propertyData.propertyId},
+                'binCollectionData': {S: JSON.stringify(propertyData.binCollectionData)},
             },
+            TableName: process.env.DYNAMODB_TABLE
           };
 
           dynamoDB.put(params, function(err, data) {
@@ -177,7 +177,8 @@ export class LaunchRequestHandler implements RequestHandler {
                 } else {
                     console.log("Got propertyId response from cheshire east, parsing it");
                     if (PROPERTY_ID_PATTERN.test(response.body)) {
-                        propertyId = PROPERTY_ID_PATTERN.exec(response.body)[1]
+                        propertyId = PROPERTY_ID_PATTERN.exec(response.body)[1];
+                        console.log("PropertyId is: " + propertyId);
                     } else {
                         console.error("Unable to parse response from Cheshire east.");
                         throw this.createBinCollectionException();
