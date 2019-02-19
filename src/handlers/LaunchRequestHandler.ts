@@ -11,7 +11,7 @@ const PERMISSIONS: string = "['read::alexa:device:all:address']";
 
 const PROPERTY_ID_PATTERN: RegExp = new RegExp("data-uprn=\"(\\d+)");
 
-const BIN_COLLECTION_DETAIL_PATTERN: RegExp = new RegExp("label for=\"\\w*\">(.+?)<");
+const BIN_COLLECTION_DETAIL_PATTERN: RegExp = new RegExp("label for=\"\\w*\">(.+?)<","g");
 
 const BIN_DATE_FORMAT: string = "dd/MM/yyyy";
 
@@ -30,7 +30,7 @@ export class LaunchRequestHandler implements RequestHandler {
             const address: Address = await this.findDeviceAddress(handlerInput);
             console.log("Address obtained from device successfully.");
 
-            const propertyData: PropertyData = this.obtainPropertyData(address);
+            const propertyData: PropertyData = await this.obtainPropertyData(address);
 
             const speechString: string = this.buildBinString(propertyData);
             
@@ -61,13 +61,13 @@ export class LaunchRequestHandler implements RequestHandler {
         return address;
     }
 
-    obtainPropertyData(address: Address): PropertyData {
+    async obtainPropertyData(address: Address): Promise<PropertyData> {
         const urlEncodedAddressLine1: string = encodeURIComponent(address.addressLine1);
 
         let propertyData = this.getPropertyDataFromDatabase(urlEncodedAddressLine1);
 
         if (propertyData === null) {
-            propertyData = this.getPropertyDataFromWebservice(address);
+            propertyData = await this.getPropertyDataFromWebservice(address);
             if (propertyData !== null) {
                 this.putPropertyDataInDatabase(propertyData);
             } else {
@@ -102,7 +102,7 @@ export class LaunchRequestHandler implements RequestHandler {
     getPropertyDataFromDatabase(addressLine1: string): PropertyData {
         let params = {
             Key: {
-                'addressLine1': {S: addressLine1},
+                'addressLine1': addressLine1,
             },
             TableName: process.env.DYNAMODB_TABLE
           };
@@ -113,13 +113,13 @@ export class LaunchRequestHandler implements RequestHandler {
             if (err) {
                 console.log("Error", err);
             } else {
-                if (data.Item.propertyId.S !== null) {
-                    console.log("Found propertyId in database: " + data.Item.propertyId.S);
+                if (data.Item !== null && data.Item.get('propertyId') !== null) {
+                    console.log("Found propertyId in database: " + data.Item.get('propertyId'));
                     if (data.Item.binCollectionData !== null) {
                         console.log("Found bin collection data in database.");
-                        let binCollectionDataList: BinCollectionData[] = JSON.parse(data.Item.binCollectionData.S);
+                        let binCollectionDataList: BinCollectionData[] = JSON.parse(data.Item.get('binCollectionData'));
 
-                        propertyDataToReturn = new PropertyData(addressLine1, data.Item.propertyId.S, binCollectionDataList);
+                        propertyDataToReturn = new PropertyData(addressLine1, data.Item.get('propertyId'), binCollectionDataList);
                     }
                 }
             }
@@ -137,9 +137,9 @@ export class LaunchRequestHandler implements RequestHandler {
 
         let params = {
             Item: {
-                'addressLine1': {S: propertyData.addressLine1},
-                'propertyId': {S: propertyData.propertyId},
-                'binCollectionData': {S: JSON.stringify(propertyData.binCollectionData)},
+                'addressLine1': propertyData.addressLine1,
+                'binCollectionData': JSON.stringify(propertyData.binCollectionData),
+                'propertyId': propertyData.propertyId,
             },
             TableName: process.env.DYNAMODB_TABLE
           };
@@ -153,22 +153,22 @@ export class LaunchRequestHandler implements RequestHandler {
         });
     }
 
-    getPropertyDataFromWebservice(address: Address): PropertyData {
-        let propertyId: string = this.getPropertyIdFromWebservice(address);
-        let binCollectionData: BinCollectionData[] = this.getBinDataFromWebService(propertyId);
+    async getPropertyDataFromWebservice(address: Address): Promise<PropertyData> {
+        let propertyId: string = await this.getPropertyIdFromWebservice(address);
+        let binCollectionData: BinCollectionData[] = await this.getBinDataFromWebService(propertyId);
 
         return new PropertyData(encodeURIComponent(address.addressLine1), propertyId, binCollectionData);
     }
 
-    getPropertyIdFromWebservice(address: Address): string {
+    async getPropertyIdFromWebservice(address: Address): Promise<string> {
         const options = {
             uri: 'https://online.cheshireeast.gov.uk/MyCollectionDay/SearchByAjax/Search?postcode=' + encodeURIComponent(address.postalCode) + '&propertyname=' + address.addressLine1.split(" ")[0]
         };
 
-        console.log("Calling cheshire east for property id.");
+        console.log("Calling cheshire east for property id: " + options.uri);
         let propertyId: string;
 
-        requestPromise.get(options, (error, response) => {
+        await requestPromise.get(options, (error, response) => {
             if (error) {
                 console.error(error.getMessage(), error);
             } else {
@@ -177,8 +177,10 @@ export class LaunchRequestHandler implements RequestHandler {
                 } else {
                     console.log("Got propertyId response from cheshire east, parsing it");
                     if (PROPERTY_ID_PATTERN.test(response.body)) {
-                        propertyId = PROPERTY_ID_PATTERN.exec(response.body)[1];
-                        console.log("PropertyId is: " + propertyId);
+                        let match = PROPERTY_ID_PATTERN.exec(response.body);
+                        console.log("Match :" + match);
+                        // propertyId = match[0];
+                        // console.log("PropertyId is: " + propertyId);
                     } else {
                         console.error("Unable to parse response from Cheshire east.");
                         throw this.createBinCollectionException();
@@ -190,7 +192,7 @@ export class LaunchRequestHandler implements RequestHandler {
         return propertyId;
     }
 
-    getBinDataFromWebService(propertyId: string): BinCollectionData[] {
+    async getBinDataFromWebService(propertyId: string): Promise<BinCollectionData[]> {
         const options = {
             uri: 'https://online.cheshireeast.gov.uk/MyCollectionDay/SearchByAjax/GetBartecJobList?uprn=' + propertyId
         };
@@ -198,7 +200,7 @@ export class LaunchRequestHandler implements RequestHandler {
         console.log("Calling cheshire east for bin collection days.");
         let binCollectionData: BinCollectionData[]
 
-        requestPromise.get(options, (error, response) => {
+        await requestPromise.get(options, (error, response) => {
             if (error) {
                 console.error(error.getMessage(), error);
             } else {
@@ -215,9 +217,11 @@ export class LaunchRequestHandler implements RequestHandler {
     }
 
     parseBinResponse(response: string): BinCollectionData[] {
+        console.log("Parsing bin response from cheshire east: " + response);
         let matches: string[];
         if (BIN_COLLECTION_DETAIL_PATTERN.test(response)) {
             matches = BIN_COLLECTION_DETAIL_PATTERN.exec(response);
+            console.log("Matches: " + matches);
         } else {
             console.error("Unable to parse response from Cheshire east.");
             throw this.createBinCollectionException();
@@ -292,8 +296,8 @@ export class LaunchRequestHandler implements RequestHandler {
         return moment(existingDate, BIN_DATE_FORMAT).isSame(moment(newDate, BIN_DATE_FORMAT));
     }
 
-    refreshBinData(propertyData: PropertyData): void {
-        let binCollectionData: BinCollectionData[] = this.getBinDataFromWebService(propertyData.propertyId);
+    async refreshBinData(propertyData: PropertyData): Promise<void> {
+        let binCollectionData: BinCollectionData[] = await this.getBinDataFromWebService(propertyData.propertyId);
         this.putPropertyDataInDatabase(new PropertyData(propertyData.addressLine1, propertyData.propertyId, binCollectionData));
     }
 
