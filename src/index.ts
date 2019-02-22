@@ -1,4 +1,4 @@
-import { HandlerInput, RequestHandler, SkillBuilders, BaseSkillBuilder } from "ask-sdk";
+import { SkillBuilders } from "ask-sdk";
 import { LambdaHandler } from "ask-sdk-core/dist/skill/factory/BaseSkillFactory";
 
 import { LaunchRequestHandler } from "./handlers/LaunchRequestHandler";

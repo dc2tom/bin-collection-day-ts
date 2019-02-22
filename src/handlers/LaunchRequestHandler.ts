@@ -3,17 +3,18 @@ import { Response, services } from "ask-sdk-model";
 import Address = services.deviceAddress.Address;
 import { DynamoDB } from "aws-sdk";
 import * as moment from 'moment';
-import * as requestPromise from 'request-promise-native'
-import { PropertyData } from '../models/PropertyData'
-import { BinCollectionData } from '../models/BinCollectionData'
+import * as requestPromise from 'request-promise-native';
+import { PropertyData } from '../models/PropertyData';
+import { BinCollectionData } from '../models/BinCollectionData';
+import {AttributeMap} from "aws-sdk/clients/dynamodb";
 
-const PERMISSIONS: string = "['read::alexa:device:all:address']";
+const PERMISSIONS = "['read::alexa:device:all:address']";
 
 const PROPERTY_ID_PATTERN: RegExp = new RegExp("data-uprn=\"(\\d+)");
 
 const BIN_COLLECTION_DETAIL_PATTERN: RegExp = new RegExp("label for=\"\\w*\">(.+?)<","g");
 
-const BIN_DATE_FORMAT: string = "dd/MM/yyyy";
+const BIN_DATE_FORMAT = "dd/MM/yyyy";
 
 const dynamoDB = new DynamoDB.DocumentClient();
 
@@ -27,7 +28,7 @@ export class LaunchRequestHandler implements RequestHandler {
         if (handlerInput.requestEnvelope.context.System.user.permissions !== null &&
             handlerInput.requestEnvelope.context.System.user.permissions.consentToken !== null) {
 
-            const address: Address = await this.findDeviceAddress(handlerInput);
+            const address: Address = await LaunchRequestHandler.findDeviceAddress(handlerInput);
             console.log("Address obtained from device successfully.");
 
             const propertyData: PropertyData = await this.obtainPropertyData(address);
@@ -47,7 +48,7 @@ export class LaunchRequestHandler implements RequestHandler {
             .getResponse();
     }
 
-    async findDeviceAddress(handlerInput: HandlerInput): Promise<Address> {
+    static async findDeviceAddress(handlerInput: HandlerInput): Promise<Address> {
         const deviceAddressServiceClient = handlerInput.serviceClientFactory.getDeviceAddressServiceClient();
         const deviceId: string = handlerInput.requestEnvelope.context.System.device.deviceId;
         const address: Address =  await deviceAddressServiceClient.getFullAddress(deviceId);
@@ -64,14 +65,20 @@ export class LaunchRequestHandler implements RequestHandler {
     async obtainPropertyData(address: Address): Promise<PropertyData> {
         const urlEncodedAddressLine1: string = encodeURIComponent(address.addressLine1);
 
-        let propertyData = this.getPropertyDataFromDatabase(urlEncodedAddressLine1);
+        let propertyData: PropertyData = null;
+
+        LaunchRequestHandler.getPropertyDataFromDatabase(urlEncodedAddressLine1).then(res => {
+            propertyData = res;
+        }).catch(err => {
+            console.error("Dynamo DB error", err);
+        });
 
         if (propertyData === null) {
             propertyData = await this.getPropertyDataFromWebservice(address);
             if (propertyData !== null) {
                 this.putPropertyDataInDatabase(propertyData);
             } else {
-                throw this.createBinCollectionException();
+                throw LaunchRequestHandler.createBinCollectionException();
             }
         }
 
@@ -79,7 +86,7 @@ export class LaunchRequestHandler implements RequestHandler {
     }
 
     buildBinString(propertyData: PropertyData): string {
-        let binCollectionData: BinCollectionData[] = this.findNextBinCollectionData(propertyData);
+        const binCollectionData: BinCollectionData[] = this.findNextBinCollectionData(propertyData);
 
         let binType: string;
         if (binCollectionData.length === 2) {
@@ -88,54 +95,54 @@ export class LaunchRequestHandler implements RequestHandler {
             binType = binCollectionData[0].binType;
         }
 
-        let returnString: string = "Your " + binType + " bin is due on " + binCollectionData[0].collectionDay + ".";
+        const returnString: string = "Your " + binType + " bin is due on " + binCollectionData[0].collectionDay + ".";
         console.info("Responding with:" + returnString);
 
         return returnString;
     }
 
-    createBinCollectionException(): Error {
+    static createBinCollectionException(): Error {
         return new Error("Sorry, we were unable to find your bin collection details. " +
                 "Please check the address assigned to your Alexa device is a valid Cheshire East address.");
     }
 
-    getPropertyDataFromDatabase(addressLine1: string): PropertyData {
-        let params = {
+    static async getPropertyDataFromDatabase(addressLine1: string): Promise<PropertyData> {
+        const params = {
             Key: {
                 'addressLine1': addressLine1,
             },
             TableName: process.env.DYNAMODB_TABLE
-          };
-        
+        };
+
         console.log('Trying database lookup using params: ' + JSON.stringify(params));
         let propertyDataToReturn: PropertyData = null;
-        dynamoDB.get(params, function(err, data) {
-            if (err) {
-                console.log("Error", err);
-            } else {
-                if (data.Item !== null && data.Item.get('propertyId') !== null) {
-                    console.log("Found propertyId in database: " + data.Item.get('propertyId'));
-                    if (data.Item.binCollectionData !== null) {
-                        console.log("Found bin collection data in database.");
-                        let binCollectionDataList: BinCollectionData[] = JSON.parse(data.Item.get('binCollectionData'));
 
-                        propertyDataToReturn = new PropertyData(addressLine1, data.Item.get('propertyId'), binCollectionDataList);
-                    }
-                }
+        const item = await dynamoDB.get(params).promise();
+
+        if (item !== null && item.Item.propertyId !== null) {
+            const data: AttributeMap = item.Item;
+            console.log("Found propertyId in database: " + data.propertyId);
+            if (data.binCollectionData !== null) {
+                console.log("Found bin collection data in database.");
+                const binCollectionDataList: BinCollectionData[] = JSON.parse(data.binCollectionData.S);
+
+                propertyDataToReturn = new PropertyData(addressLine1, data.propertyId.S, binCollectionDataList);
             }
-        });
+        } else {
+            throw new Error("Property data not found in database.");
+        }
 
         if (propertyDataToReturn === null) {
             console.log("No data found in database for this property.");
         }
-        
+
         return propertyDataToReturn;
     }
 
     putPropertyDataInDatabase(propertyData: PropertyData) {
-        console.log("Writing bin data to database.")
+        console.log("Writing bin data to database.");
 
-        let params = {
+        const params = {
             Item: {
                 'addressLine1': propertyData.addressLine1,
                 'binCollectionData': JSON.stringify(propertyData.binCollectionData),
@@ -144,18 +151,18 @@ export class LaunchRequestHandler implements RequestHandler {
             TableName: process.env.DYNAMODB_TABLE
           };
 
-          dynamoDB.put(params, function(err, data) {
+          dynamoDB.put(params, (err) => {
             if (err) {
                 console.log("Error", err);
             } else {
-                console.log("Bin data written to database.")
+                console.log("Bin data written to database.");
             }
         });
     }
 
     async getPropertyDataFromWebservice(address: Address): Promise<PropertyData> {
-        let propertyId: string = await this.getPropertyIdFromWebservice(address);
-        let binCollectionData: BinCollectionData[] = await this.getBinDataFromWebService(propertyId);
+        const propertyId: string = await this.getPropertyIdFromWebservice(address);
+        const binCollectionData: BinCollectionData[] = await this.getBinDataFromWebService(propertyId);
 
         return new PropertyData(encodeURIComponent(address.addressLine1), propertyId, binCollectionData);
     }
@@ -166,7 +173,7 @@ export class LaunchRequestHandler implements RequestHandler {
         };
 
         console.log("Calling cheshire east for property id: " + options.uri);
-        let propertyId: string;
+        let propertyId: string = null;
 
         await requestPromise.get(options, (error, response) => {
             if (error) {
@@ -177,13 +184,13 @@ export class LaunchRequestHandler implements RequestHandler {
                 } else {
                     console.log("Got propertyId response from cheshire east, parsing it");
                     if (PROPERTY_ID_PATTERN.test(response.body)) {
-                        let match = PROPERTY_ID_PATTERN.exec(response.body);
+                        const match = PROPERTY_ID_PATTERN.exec(response.body);
                         console.log("Match :" + match);
-                        // propertyId = match[0];
-                        // console.log("PropertyId is: " + propertyId);
+                        propertyId = match[0];
+                        console.log("PropertyId is: " + propertyId);
                     } else {
                         console.error("Unable to parse response from Cheshire east.");
-                        throw this.createBinCollectionException();
+                        throw LaunchRequestHandler.createBinCollectionException();
                     }
                 }
             }
@@ -198,7 +205,7 @@ export class LaunchRequestHandler implements RequestHandler {
         };
 
         console.log("Calling cheshire east for bin collection days.");
-        let binCollectionData: BinCollectionData[]
+        let binCollectionData: BinCollectionData[] = [];
 
         await requestPromise.get(options, (error, response) => {
             if (error) {
@@ -208,7 +215,7 @@ export class LaunchRequestHandler implements RequestHandler {
                     console.error("Http error: " + response.statusMessage);
                 } else {
                     console.log("Got bin data response from cheshire east, parsing it.");
-                    binCollectionData = this.parseBinResponse(response.body);
+                    binCollectionData = LaunchRequestHandler.parseBinResponse(response.body);
                 }
             }
         });
@@ -216,7 +223,7 @@ export class LaunchRequestHandler implements RequestHandler {
         return binCollectionData;
     }
 
-    parseBinResponse(response: string): BinCollectionData[] {
+    static parseBinResponse(response: string): BinCollectionData[] {
         console.log("Parsing bin response from cheshire east: " + response);
         let matches: string[];
         if (BIN_COLLECTION_DETAIL_PATTERN.test(response)) {
@@ -224,20 +231,20 @@ export class LaunchRequestHandler implements RequestHandler {
             console.log("Matches: " + matches);
         } else {
             console.error("Unable to parse response from Cheshire east.");
-            throw this.createBinCollectionException();
+            throw LaunchRequestHandler.createBinCollectionException();
         }
 
-        let binCollectionData: BinCollectionData[];
-        let i: number = 0;
+        const binCollectionData: BinCollectionData[] = [];
+        let i = 0;
 
         while (i < matches.length) {
-            binCollectionData.push(new BinCollectionData(matches[i++], matches[i++], this.parseBinType(matches[i++])));
+            binCollectionData.push(new BinCollectionData(matches[i++], matches[i++], LaunchRequestHandler.parseBinType(matches[i++])));
         }
 
         return binCollectionData;
     }
 
-    parseBinType(binTypeString: string): string {
+    static parseBinType(binTypeString: string): string {
         switch (binTypeString.replace("Empty Standard ", "")) {
             case "Garden Waste":
                 return "Green";
@@ -249,20 +256,20 @@ export class LaunchRequestHandler implements RequestHandler {
     }
 
     findNextBinCollectionData(propertyData: PropertyData): BinCollectionData[] {
-        let counter: number = 1;
-        let refreshed: boolean = false;
+        let counter = 1;
+        let refreshed = false;
         
-        let nextCollectionData: BinCollectionData[];
+        const nextCollectionData: BinCollectionData[] = [];
 
-        for (let item of propertyData.binCollectionData) {
+        for (const item of propertyData.binCollectionData) {
             if (moment(item.collectionDate).isAfter(moment())) {
                 if (propertyData.binCollectionData.length - counter <= 3 && !refreshed) {
-                    //this.refreshBinData(propertyData);
+                    this.refreshBinData(propertyData);
                     refreshed = true;
                 }
                 if (nextCollectionData.length === 1) {
                     // Does next bin in the collection belong with the one we are returning?
-                    if (this.matchesExistingDate(nextCollectionData[0].collectionDate, item.collectionDate)) {
+                    if (LaunchRequestHandler.matchesExistingDate(nextCollectionData[0].collectionDate, item.collectionDate)) {
                         nextCollectionData.push(item);
                         break;
                     } else {
@@ -292,12 +299,12 @@ export class LaunchRequestHandler implements RequestHandler {
         return nextCollectionData;
     }
 
-    matchesExistingDate(existingDate: string, newDate: string): boolean {
+    static matchesExistingDate(existingDate: string, newDate: string): boolean {
         return moment(existingDate, BIN_DATE_FORMAT).isSame(moment(newDate, BIN_DATE_FORMAT));
     }
 
     async refreshBinData(propertyData: PropertyData): Promise<void> {
-        let binCollectionData: BinCollectionData[] = await this.getBinDataFromWebService(propertyData.propertyId);
+        const binCollectionData: BinCollectionData[] = await this.getBinDataFromWebService(propertyData.propertyId);
         this.putPropertyDataInDatabase(new PropertyData(propertyData.addressLine1, propertyData.propertyId, binCollectionData));
     }
 

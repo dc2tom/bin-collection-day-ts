@@ -1,5 +1,5 @@
 import { HandlerInput, ErrorHandler } from "ask-sdk";
-import { Response } from "ask-sdk-model"
+import { Response } from "ask-sdk-model";
 
 export class GenericErrorHandler implements ErrorHandler {
     canHandle(handlerInput: HandlerInput): boolean {

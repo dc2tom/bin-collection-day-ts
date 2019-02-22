@@ -1,4 +1,4 @@
-import {BinCollectionData} from './BinCollectionData'
+import {BinCollectionData} from './BinCollectionData';
 
 export class PropertyData {
     addressLine1: string;
