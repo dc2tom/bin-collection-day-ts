@@ -6,7 +6,6 @@ import * as moment from 'moment';
 import * as requestPromise from 'request-promise-native';
 import { PropertyData } from '../models/PropertyData';
 import { BinCollectionData } from '../models/BinCollectionData';
-import {AttributeMap} from "aws-sdk/clients/dynamodb";
 
 const PERMISSIONS = "['read::alexa:device:all:address']";
 
@@ -117,10 +116,15 @@ export class LaunchRequestHandler implements RequestHandler {
         console.log('Trying database lookup using params: ' + JSON.stringify(params));
         let propertyDataToReturn: PropertyData = null;
 
-        const item = await dynamoDB.get(params).promise();
+        let data = null;
 
-        if (item !== null && item.Item.propertyId !== null) {
-            const data: AttributeMap = item.Item;
+        await dynamoDB.get(params).promise().then(res => {
+            data = res.Item;
+        }).catch(err => {
+            console.error("Dynamo DB error", err);
+        });
+
+        if (data !== null && data.propertyId !== null) {
             console.log("Found propertyId in database: " + data.propertyId);
             if (data.binCollectionData !== null) {
                 console.log("Found bin collection data in database.");
@@ -186,7 +190,7 @@ export class LaunchRequestHandler implements RequestHandler {
                     if (PROPERTY_ID_PATTERN.test(response.body)) {
                         const match = PROPERTY_ID_PATTERN.exec(response.body);
                         console.log("Match :" + match);
-                        propertyId = match[0];
+                        propertyId = match[1];
                         console.log("PropertyId is: " + propertyId);
                     } else {
                         console.error("Unable to parse response from Cheshire east.");
@@ -225,11 +229,13 @@ export class LaunchRequestHandler implements RequestHandler {
 
     static parseBinResponse(response: string): BinCollectionData[] {
         console.log("Parsing bin response from cheshire east: " + response);
-        let matches: string[];
-        if (BIN_COLLECTION_DETAIL_PATTERN.test(response)) {
-            matches = BIN_COLLECTION_DETAIL_PATTERN.exec(response);
+        const matches: string[] = [];
+        while (BIN_COLLECTION_DETAIL_PATTERN.test(response)) {
+            matches.push(BIN_COLLECTION_DETAIL_PATTERN.exec(response).input);
             console.log("Matches: " + matches);
-        } else {
+        }
+
+        if (matches.length === 0) {
             console.error("Unable to parse response from Cheshire east.");
             throw LaunchRequestHandler.createBinCollectionException();
         }
