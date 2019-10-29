@@ -23,7 +23,7 @@ export class LaunchRequestHandler implements RequestHandler {
         return request.type === 'LaunchRequest';
     }
 
-    handle(handlerInput: HandlerInput): Response {
+    async handle(handlerInput: HandlerInput): Promise<Response> {
         if (handlerInput.requestEnvelope.context.System.user.permissions !== null &&
             handlerInput.requestEnvelope.context.System.user.permissions.consentToken !== null) {
 
@@ -51,8 +51,7 @@ export class LaunchRequestHandler implements RequestHandler {
     async function findDeviceAddress(handlerInput: HandlerInput): Promise<Address> {
         const deviceAddressServiceClient = handlerInput.serviceClientFactory.getDeviceAddressServiceClient();
         const deviceId: string = handlerInput.requestEnvelope.context.System.device.deviceId;
-        const address: Address = await deviceAddressServiceClient.getFullAddress(deviceId)
-            .then;
+        const address: Address = await deviceAddressServiceClient.getFullAddress(deviceId);
 
         if (address.addressLine1 === null || address.postalCode === null) {
             console.log("Address is not complete. Line 1: " + address.addressLine1 + " Postcode: " + address.postalCode);
@@ -167,21 +166,10 @@ export class LaunchRequestHandler implements RequestHandler {
     }
 
     async function getPropertyDataFromWebservice(address: Address): Promise<PropertyData> {
-        let propertyId: string;
-        let propertyDataToReturn: PropertyData;
-
-        getPropertyIdFromWebservice(address)
-            .then(res => {
-                propertyId = res;
-                getBinDataFromWebService(res);
-            })
-            .then(binCollectionData => {
-                propertyDataToReturn = new PropertyData(encodeURIComponent(address.addressLine1), propertyId, binCollectionData);
-            }).catch(e => {
-                throw e;
-            });
-
-        return propertyDataToReturn;
+        const propertyId: string = await getPropertyIdFromWebservice(address);
+        const binCollectionData: BinCollectionData[] = await getBinDataFromWebService(propertyId);
+        
+        return new PropertyData(encodeURIComponent(address.addressLine1), propertyId, binCollectionData);
     }
 
     async function getPropertyIdFromWebservice(address: Address): Promise<string> {
