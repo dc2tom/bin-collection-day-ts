@@ -6,8 +6,9 @@ import * as moment from 'moment';
 import * as requestPromise from 'request-promise-native';
 import { PropertyData } from '../models/PropertyData';
 import { BinCollectionData } from '../models/BinCollectionData';
+import { ResponseRequest } from "request";
 
-const PERMISSIONS = "['read::alexa:device:all:address']";
+const PERMISSIONS = ['read::alexa:device:all:address'];
 
 const PROPERTY_ID_PATTERN: RegExp = new RegExp("data-uprn=\"[\\d+]");
 
@@ -24,29 +25,30 @@ export class LaunchRequestHandler implements RequestHandler {
     }
 
     async handle(handlerInput: HandlerInput): Promise<Response> {
-        if (handlerInput.requestEnvelope.context.System.user.permissions !== null &&
-            handlerInput.requestEnvelope.context.System.user.permissions.consentToken !== null) {
-
-            const address: Address = await findDeviceAddress(handlerInput);
-            console.log("Address obtained from device successfully.");
-
-            const propertyData: PropertyData = await obtainPropertyData(address);
-
-            const speechString: string = buildBinString(propertyData);
-            
-            const responseBuilder: ResponseBuilder = handlerInput.responseBuilder;
-            return responseBuilder.speak(speechString)
-                .withSimpleCard("Next Bin Collection", speechString)
-                .withShouldEndSession(true)
-                .getResponse();
-            } 
+        const consentToken = handlerInput.requestEnvelope.context.System.user.permissions
+            && handlerInput.requestEnvelope.context.System.user.permissions.consentToken;
         
-        return handlerInput.responseBuilder
-            .speak("No Permissions found. If you want me to be able to tell you when your bins are due please grant this skill access to full address information in the Amazon Alexa App.")
-            .withAskForPermissionsConsentCard(new Array(PERMISSIONS))
+        if (!consentToken) {
+            return handlerInput.responseBuilder
+                .speak("No Permissions found. If you want me to be able to tell you when your bins are due please grant this skill access to full address information in the Amazon Alexa App.")
+                .withAskForPermissionsConsentCard(PERMISSIONS)
+                .getResponse();
+        }
+
+        const address: Address = await findDeviceAddress(handlerInput);
+        console.log("Address obtained from device successfully.");
+
+        const propertyData: PropertyData = await obtainPropertyData(address);
+
+        const speechString: string = buildBinString(propertyData);
+        
+        const responseBuilder: ResponseBuilder = handlerInput.responseBuilder;
+        return responseBuilder.speak(speechString)
+            .withSimpleCard("Next Bin Collection", speechString)
+            .withShouldEndSession(true)
             .getResponse();
+        } 
     }
-}
 
     async function findDeviceAddress(handlerInput: HandlerInput): Promise<Address> {
         const deviceAddressServiceClient = handlerInput.serviceClientFactory.getDeviceAddressServiceClient();
@@ -67,11 +69,11 @@ export class LaunchRequestHandler implements RequestHandler {
 
         let propertyData: PropertyData = null;
 
-        getPropertyDataFromDatabase(urlEncodedAddressLine1).then(res => {
-            propertyData = res;
-        }).catch(err => {
-            console.error("Dynamo DB error", err);
-        });
+        try {
+            propertyData = await getPropertyDataFromDatabase(urlEncodedAddressLine1);
+        } catch(err) {
+            console.error("Error attempting to obtain data from database", err);
+        }
 
         if (propertyData === null) {
             propertyData = await getPropertyDataFromWebservice(address);
@@ -115,17 +117,18 @@ export class LaunchRequestHandler implements RequestHandler {
         };
 
         console.log('Trying database lookup using params: ' + JSON.stringify(params));
-        let propertyDataToReturn: PropertyData = null;
 
         let data = null;
 
-        await dynamoDB.get(params).promise().then(res => {
-            data = res.Item;
-        }).catch(err => {
-            console.error("Dynamo DB error", err);
-        });
+        try {
+            data = await dynamoDB.get(params).promise();
+        } catch (err) {
+            console.error("Dynamo DB client error.", err);
+        }
 
-        if (data !== null && data.propertyId !== null) {
+        let propertyDataToReturn: PropertyData = null;
+
+        if (data && data.propertyId) {
             console.log("Found propertyId in database: " + data.propertyId);
             if (data.binCollectionData !== null) {
                 console.log("Found bin collection data in database.");
@@ -133,8 +136,6 @@ export class LaunchRequestHandler implements RequestHandler {
 
                 propertyDataToReturn = new PropertyData(addressLine1, data.propertyId.S, binCollectionDataList);
             }
-        } else {
-            throw new Error("Property data not found in database.");
         }
 
         if (propertyDataToReturn === null) {
@@ -177,30 +178,34 @@ export class LaunchRequestHandler implements RequestHandler {
             uri: 'https://online.cheshireeast.gov.uk/MyCollectionDay/SearchByAjax/Search?postcode=' + encodeURIComponent(address.postalCode) + '&propertyname=' + address.addressLine1.split(" ")[0]
         };
         console.log("Calling cheshire east for property id: " + options.uri);
-        let propertyId: string = null;
+        let response: requestPromise.FullResponse = null;
 
-        await requestPromise.get(options, (error, response) => {
-            if (error) {
-                console.error(error.getMessage(), error);
+        try {
+            response = await requestPromise.get(options);
+        } catch(err) {
+            console.error(err.getMessage(), err);
+        }
+
+        console.log("Response from cheshire east: " + response.body);
+
+        let propertyId: string = null;
+        
+        if (response.statusCode !== 200) {
+            console.error("Http error: " + response.statusMessage);
+        } else {
+            console.log("Got propertyId response from cheshire east, parsing it");
+            if (PROPERTY_ID_PATTERN.test(response.body)) {
+                const match = PROPERTY_ID_PATTERN.exec(response.body);
+                console.log("Property ID is :" + match);
+                propertyId = match[0];
             } else {
-                if (response.statusCode !== 200) {
-                    console.error("Http error: " + response.statusMessage);
-                } else {
-                    console.log("Got propertyId response from cheshire east, parsing it");
-                    if (PROPERTY_ID_PATTERN.test(response.body)) {
-                        const match = PROPERTY_ID_PATTERN.exec(response.body);
-                        console.log("Match :" + match);
-                        propertyId = match[0];
-                        console.log("PropertyId is: " + propertyId);
-                    } else {
-                        console.error("Unable to parse response from Cheshire east.");
-                        throw createBinCollectionException();
-                    }
-                }
+                console.error("Unable to parse response from Cheshire east.");
+                throw createBinCollectionException();
             }
-        });
+        }
 
         return propertyId;
+
     }
 
     async function getBinDataFromWebService(propertyId: string): Promise<BinCollectionData[]> {
@@ -208,7 +213,7 @@ export class LaunchRequestHandler implements RequestHandler {
             uri: 'https://online.cheshireeast.gov.uk/MyCollectionDay/SearchByAjax/GetBartecJobList?uprn=' + propertyId
         };
 
-        console.log("Calling cheshire east for bin collection days.");
+        console.log("Calling cheshire east for bin collection days with propertyId: " + propertyId);
         let binCollectionData: BinCollectionData[] = [];
 
         await requestPromise.get(options, (error, response) => {
