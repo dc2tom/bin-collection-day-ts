@@ -3,20 +3,17 @@ import { Response, services } from "ask-sdk-model";
 import Address = services.deviceAddress.Address;
 import { DynamoDB } from "aws-sdk";
 import * as moment from 'moment';
-import * as requestPromise from 'request-promise-native';
 import { PropertyData } from '../models/PropertyData';
 import { BinCollectionData } from '../models/BinCollectionData';
-import { ResponseRequest } from "request";
+import { CheshireEastClient } from "./business-logic/CheshireEastClient";
 
 const PERMISSIONS = ['read::alexa:device:all:address'];
-
-const PROPERTY_ID_PATTERN: RegExp = new RegExp("data-uprn=\"[\\d+]");
-
-const BIN_COLLECTION_DETAIL_PATTERN: RegExp = new RegExp("label for=\"\\w*\">[.+?]<","g");
 
 const BIN_DATE_FORMAT = "dd/MM/yyyy";
 
 const dynamoDB = new DynamoDB.DocumentClient();
+
+const cheshireEastClient = new CheshireEastClient();
 
 export class LaunchRequestHandler implements RequestHandler {
     canHandle(handlerInput: HandlerInput): boolean {
@@ -47,8 +44,8 @@ export class LaunchRequestHandler implements RequestHandler {
             .withSimpleCard("Next Bin Collection", speechString)
             .withShouldEndSession(true)
             .getResponse();
-        } 
     }
+}
 
     async function findDeviceAddress(handlerInput: HandlerInput): Promise<Address> {
         const deviceAddressServiceClient = handlerInput.serviceClientFactory.getDeviceAddressServiceClient();
@@ -76,7 +73,7 @@ export class LaunchRequestHandler implements RequestHandler {
         }
 
         if (propertyData === null) {
-            propertyData = await getPropertyDataFromWebservice(address);
+            propertyData = await cheshireEastClient.getPropertyDataFromWebservice(address);
             if (propertyData !== null) {
                 putPropertyDataInDatabase(propertyData);
             } else {
@@ -166,106 +163,6 @@ export class LaunchRequestHandler implements RequestHandler {
         });
     }
 
-    async function getPropertyDataFromWebservice(address: Address): Promise<PropertyData> {
-        const propertyId: string = await getPropertyIdFromWebservice(address);
-        const binCollectionData: BinCollectionData[] = await getBinDataFromWebService(propertyId);
-        
-        return new PropertyData(encodeURIComponent(address.addressLine1), propertyId, binCollectionData);
-    }
-
-    async function getPropertyIdFromWebservice(address: Address): Promise<string> {
-        const options = {
-            uri: 'https://online.cheshireeast.gov.uk/MyCollectionDay/SearchByAjax/Search?postcode=' + encodeURIComponent(address.postalCode) + '&propertyname=' + address.addressLine1.split(" ")[0]
-        };
-        console.log("Calling cheshire east for property id: " + options.uri);
-        let response: requestPromise.FullResponse = null;
-
-        try {
-            response = await requestPromise.get(options);
-        } catch(err) {
-            console.error(err.getMessage(), err);
-        }
-
-        console.log("Response from cheshire east: " + response.body);
-
-        let propertyId: string = null;
-        
-        if (response.statusCode !== 200) {
-            console.error("Http error: " + response.statusMessage);
-        } else {
-            console.log("Got propertyId response from cheshire east, parsing it");
-            if (PROPERTY_ID_PATTERN.test(response.body)) {
-                const match = PROPERTY_ID_PATTERN.exec(response.body);
-                console.log("Property ID is :" + match);
-                propertyId = match[0];
-            } else {
-                console.error("Unable to parse response from Cheshire east.");
-                throw createBinCollectionException();
-            }
-        }
-
-        return propertyId;
-
-    }
-
-    async function getBinDataFromWebService(propertyId: string): Promise<BinCollectionData[]> {
-        const options = {
-            uri: 'https://online.cheshireeast.gov.uk/MyCollectionDay/SearchByAjax/GetBartecJobList?uprn=' + propertyId
-        };
-
-        console.log("Calling cheshire east for bin collection days with propertyId: " + propertyId);
-        let binCollectionData: BinCollectionData[] = [];
-
-        await requestPromise.get(options, (error, response) => {
-            if (error) {
-                console.error(error.getMessage(), error);
-            } else {
-                if (response.statusCode !== 200) {
-                    console.error("Http error: " + response.statusMessage);
-                } else {
-                    console.log("Got bin data response from cheshire east, parsing it.");
-                    binCollectionData = parseBinResponse(response.body);
-                }
-            }
-        });
-
-        return binCollectionData;
-    }
-
-    function parseBinResponse(response: string): BinCollectionData[] {
-        console.log("Parsing bin response from cheshire east: " + response);
-        const matches: string[] = [];
-        while (BIN_COLLECTION_DETAIL_PATTERN.test(response)) {
-            matches.push(BIN_COLLECTION_DETAIL_PATTERN.exec(response).input);
-            console.log("Matches: " + matches);
-        }
-
-        if (matches.length === 0) {
-            console.error("Unable to parse response from Cheshire east.");
-            throw createBinCollectionException();
-        }
-
-        const binCollectionData: BinCollectionData[] = [];
-        let i = 0;
-
-        while (i < matches.length) {
-            binCollectionData.push(new BinCollectionData(matches[i++], matches[i++], parseBinType(matches[i++])));
-        }
-
-        return binCollectionData;
-    }
-
-    function parseBinType(binTypeString: string): string {
-        switch (binTypeString.replace("Empty Standard ", "")) {
-            case "Garden Waste":
-                return "Green";
-            case "Mixed Recycling":
-                return "Silver";
-            default:
-                return "Black";
-        }
-    }
-
     function findNextBinCollectionData(propertyData: PropertyData): BinCollectionData[] {
         let counter = 1;
         let refreshed = false;
@@ -315,6 +212,6 @@ export class LaunchRequestHandler implements RequestHandler {
     }
 
     async function refreshBinData(propertyData: PropertyData): Promise<void> {
-        const binCollectionData: BinCollectionData[] = await getBinDataFromWebService(propertyData.propertyId);
+        const binCollectionData: BinCollectionData[] = await cheshireEastClient.getBinDataFromWebService(propertyData.propertyId);
         putPropertyDataInDatabase(new PropertyData(propertyData.addressLine1, propertyData.propertyId, binCollectionData));
     }
