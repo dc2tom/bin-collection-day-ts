@@ -3,7 +3,7 @@ import { BinCollectionData } from "../../models/BinCollectionData";
 import { PropertyData } from "../../models/PropertyData";
 import { ShortAddress } from "../../models/ShortAddress";
 
-const PROPERTY_ID_PATTERN: RegExp = new RegExp("data-uprn=\"(\d+)");
+const PROPERTY_ID_PATTERN: RegExp = new RegExp("data-uprn=\"[\\d+]");
 
 const BIN_COLLECTION_DETAIL_PATTERN: RegExp = new RegExp("label for=\"\\w*\">[.+?]<","g");
 
@@ -21,33 +21,30 @@ export class CheshireEastClient {
             uri: 'https://online.cheshireeast.gov.uk/MyCollectionDay/SearchByAjax/Search?postcode=' + encodeURIComponent(address.postCode) + '&propertyname=' + address.addressLine1.split(" ")[0]
         };
         console.log("Calling cheshire east for property id: " + options.uri);
+        let response: requestPromise.FullResponse = null;
     
-        const serviceResponse = await requestPromise.get(options, (error, response) => {
-            if (error) {
-                console.error(error.getMessage(), error);
-                createBinCollectionException();
-            } else {
-                if (response.statusCode !== 200) {
-                    console.error("Http error: " + response.statusMessage);
-                    createBinCollectionException();
-                } else {
-                    return response.body;
-                }
-            }
-        });
+        try {
+            response = await requestPromise.get(options);
+        } catch(err) {
+            console.error(err.getMessage(), err);
+        }
     
-        console.log("Response from cheshire east: " + serviceResponse);
+        console.log("Response from cheshire east: " + response.body);
     
         let propertyId: string = null;
         
-        console.log("Got propertyId response from cheshire east, parsing it");
-        if (PROPERTY_ID_PATTERN.test(serviceResponse)) {
-            const match = PROPERTY_ID_PATTERN.exec(serviceResponse);
-            console.log("Property ID is :" + match);
-            propertyId = match[0];
+        if (response.statusCode !== 200) {
+            console.error("Http error: " + response.statusMessage);
         } else {
-            console.error("Unable to parse response from Cheshire east.");
-            throw createBinCollectionException();
+            console.log("Got propertyId response from cheshire east, parsing it");
+            if (PROPERTY_ID_PATTERN.test(response.body)) {
+                const match = PROPERTY_ID_PATTERN.exec(response.body);
+                console.log("Property ID is :" + match);
+                propertyId = match[0];
+            } else {
+                console.error("Unable to parse response from Cheshire east.");
+                throw createBinCollectionException();
+            }
         }
     
         return propertyId;
@@ -61,23 +58,19 @@ export class CheshireEastClient {
         console.log("Calling cheshire east for bin collection days with propertyId: " + propertyId);
         let binCollectionData: BinCollectionData[] = [];
     
-        const serviceResponse = await requestPromise.get(options, (error, response) => {
+        await requestPromise.get(options, (error, response) => {
             if (error) {
                 console.error(error.getMessage(), error);
-                createBinCollectionException();
             } else {
                 if (response.statusCode !== 200) {
                     console.error("Http error: " + response.statusMessage);
-                    createBinCollectionException();
                 } else {
-                    return response.body;
+                    console.log("Got bin data response from cheshire east, parsing it.");
+                    binCollectionData = this.parseBinResponse(response.body);
                 }
             }
         });
-        
-        console.log("Got bin data response from cheshire east, parsing it.");
-        binCollectionData = this.parseBinResponse(serviceResponse);
-
+    
         return binCollectionData;
     }
 

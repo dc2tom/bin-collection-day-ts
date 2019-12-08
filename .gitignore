@@ -64,6 +64,8 @@ typings/
 # compiled javascript
 *.js
 *.js.map
+.out
 
 .DS_Store
 .idea
+.vscode
