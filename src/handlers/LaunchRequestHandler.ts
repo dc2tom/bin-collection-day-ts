@@ -78,7 +78,7 @@ export class LaunchRequestHandler implements RequestHandler {
             console.log("No bin data from in database for this property, trying webservice");
             propertyData = await cheshireEastClient.getPropertyDataFromWebservice(address);
             if (propertyData !== null) {
-                putPropertyDataInDatabase(propertyData);
+                await putPropertyDataInDatabase(propertyData);
             } else {
                 throw createBinCollectionException();
             }
@@ -122,19 +122,20 @@ export class LaunchRequestHandler implements RequestHandler {
 
         try {
             data = await dynamoDB.get(params).promise();
+            console.log("data from database: " + JSON.stringify(data));
         } catch (err) {
             console.error("Dynamo DB client error.", err);
         }
 
         let propertyDataToReturn: PropertyData = null;
 
-        if (data && data.propertyId) {
-            console.log("Found propertyId in database: " + data.propertyId);
-            if (data.binCollectionData !== null) {
+        if (data.Item && data.Item.propertyId) {
+            console.log("Found propertyId in database: " + data.Item.propertyId);
+            if (data.Item.binCollectionData !== null) {
                 console.log("Found bin collection data in database.");
-                const binCollectionDataList: BinCollectionData[] = JSON.parse(data.binCollectionData.S);
+                const binCollectionDataList: BinCollectionData[] = JSON.parse(data.Item.binCollectionData);
 
-                propertyDataToReturn = new PropertyData(addressLine1, data.propertyId.S, binCollectionDataList);
+                propertyDataToReturn = new PropertyData(addressLine1, data.Item.propertyId, binCollectionDataList);
             }
         }
 
@@ -145,7 +146,7 @@ export class LaunchRequestHandler implements RequestHandler {
         return propertyDataToReturn;
     }
 
-    function putPropertyDataInDatabase(propertyData: PropertyData) {
+    async function putPropertyDataInDatabase(propertyData: PropertyData) {
         console.log("Writing bin data to database.");
 
         const params = {
@@ -157,16 +158,16 @@ export class LaunchRequestHandler implements RequestHandler {
             TableName: process.env.DYNAMODB_TABLE
           };
 
-          dynamoDB.put(params, (err) => {
-            if (err) {
-                console.log("Error", err);
-            } else {
-                console.log("Bin data written to database.");
-            }
-        });
+        try {
+            await dynamoDB.put(params).promise();
+            console.log("Bin data written to database");
+        } catch (err) {
+            console.error("Dynamo DB client error.", err);
+        }
     }
 
     function findNextBinCollectionData(propertyData: PropertyData): BinCollectionData[] {
+        console.log("Finding next bin collection date");
         let counter = 1;
         let refreshed = false;
         
@@ -181,6 +182,7 @@ export class LaunchRequestHandler implements RequestHandler {
                 if (nextCollectionData.length === 1) {
                     // Does next bin in the collection belong with the one we are returning?
                     if (matchesExistingDate(nextCollectionData[0].collectionDate, item.collectionDate)) {
+                        console.log("Adding: " + item.binType + " bin");
                         nextCollectionData.push(item);
                         break;
                     } else {
@@ -191,10 +193,12 @@ export class LaunchRequestHandler implements RequestHandler {
                 if (nextCollectionData.length === 0) {
                     // Black bins are only ever collected alone.
                     if ("Black" === (item.binType)) {
+                        console.log("Adding Black bin");
                         nextCollectionData.push(item);
                         break;
                     } else {
                         // Must be silver or green bin.
+                        console.log("Adding: " + item.binType + " bin");
                         nextCollectionData.push(item);
                     }
                 }
@@ -204,7 +208,7 @@ export class LaunchRequestHandler implements RequestHandler {
 
         if (nextCollectionData.length === 0) {
             console.error("No valid stored bin collection data found for this property.");
-            //TODO we have terrible data..
+            createBinCollectionException();
         }
 
         return nextCollectionData;
@@ -216,5 +220,5 @@ export class LaunchRequestHandler implements RequestHandler {
 
     async function refreshBinData(propertyData: PropertyData): Promise<void> {
         const binCollectionData: BinCollectionData[] = await cheshireEastClient.getBinDataFromWebService(propertyData.propertyId);
-        putPropertyDataInDatabase(new PropertyData(propertyData.addressLine1, propertyData.propertyId, binCollectionData));
+        await putPropertyDataInDatabase(new PropertyData(propertyData.addressLine1, propertyData.propertyId, binCollectionData));
     }

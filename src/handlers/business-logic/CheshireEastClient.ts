@@ -3,9 +3,9 @@ import { BinCollectionData } from "../../models/BinCollectionData";
 import { PropertyData } from "../../models/PropertyData";
 import { ShortAddress } from "../../models/ShortAddress";
 
-const PROPERTY_ID_PATTERN: RegExp = new RegExp("data-uprn=\"(\d+)");
+const PROPERTY_ID_PATTERN: RegExp = new RegExp("data-uprn=\"(\\d+)");
 
-const BIN_COLLECTION_DETAIL_PATTERN: RegExp = new RegExp("label for=\"\\w*\">[.+?]<","g");
+const BIN_COLLECTION_DETAIL_PATTERN: RegExp = new RegExp("label for=\"\\w*\">(.+?)<","g");
 
 export class CheshireEastClient {
 
@@ -13,6 +13,7 @@ export class CheshireEastClient {
         const propertyId: string = await this.getPropertyIdFromWebservice(address);
         const binCollectionData: BinCollectionData[] = await this.getBinDataFromWebService(propertyId);
         
+        console.log("Bin collection data from webservice: " + JSON.stringify(binCollectionData));
         return new PropertyData(encodeURIComponent(address.addressLine1), propertyId, binCollectionData);
     }
     
@@ -36,15 +37,15 @@ export class CheshireEastClient {
             }
         });
     
-        console.log("Response from cheshire east: " + serviceResponse);
+        // console.log("Response from cheshire east: " + serviceResponse);
     
         let propertyId: string = null;
         
         console.log("Got propertyId response from cheshire east, parsing it");
         if (PROPERTY_ID_PATTERN.test(serviceResponse)) {
             const match = PROPERTY_ID_PATTERN.exec(serviceResponse);
-            console.log("Property ID is :" + match);
-            propertyId = match[0];
+            console.log("Property ID is :" + match[1]);
+            propertyId = match[1];
         } else {
             console.error("Unable to parse response from Cheshire east.");
             throw createBinCollectionException();
@@ -82,11 +83,16 @@ export class CheshireEastClient {
     }
 
     parseBinResponse(response: string): BinCollectionData[] {
-        console.log("Parsing bin response from cheshire east: " + response);
+        // console.log("Parsing bin response from cheshire east: " + response);
         const matches: string[] = [];
-        while (BIN_COLLECTION_DETAIL_PATTERN.test(response)) {
-            matches.push(BIN_COLLECTION_DETAIL_PATTERN.exec(response).input);
-            console.log("Matches: " + matches);
+        let counter = 0;
+        let match = BIN_COLLECTION_DETAIL_PATTERN.exec(response);
+
+        // Stop at 30 - the final 3 matches are duff entries returned by the web service
+        while (match !== null && counter < 30) {
+            matches.push(match[1]);
+            match = BIN_COLLECTION_DETAIL_PATTERN.exec(response);
+            counter++;
         }
 
         if (matches.length === 0) {
@@ -95,17 +101,20 @@ export class CheshireEastClient {
         }
 
         const binCollectionData: BinCollectionData[] = [];
+
         let i = 0;
 
-        while (i < matches.length) {
-            binCollectionData.push(new BinCollectionData(matches[i++], matches[i++], this.parseBinType(matches[i++])));
+        while (i < (matches.length - 3)) {
+            const binCollection = new BinCollectionData(matches[i++], matches[i++], this.parseBinType(matches[i++]));
+            binCollectionData.push(binCollection);
         }
 
         return binCollectionData;
     }
 
     parseBinType(binTypeString: string): string {
-        switch (binTypeString.replace("Empty Standard ", "")) {
+        const binType: string = binTypeString.replace("Empty Standard ", "");
+        switch (binType) {
             case "Garden Waste":
                 return "Green";
             case "Mixed Recycling":
