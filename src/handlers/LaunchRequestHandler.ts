@@ -176,6 +176,7 @@ export class LaunchRequestHandler implements RequestHandler {
         for (const item of propertyData.binCollectionData) {
             if (moment(item.collectionDate).isAfter(moment())) {
                 if (propertyData.binCollectionData.length - counter <= 3 && !refreshed) {
+                    console.log("Not much bin data in database, refreshing");
                     refreshBinData(propertyData);
                     refreshed = true;
                 }
