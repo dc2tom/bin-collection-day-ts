@@ -14,7 +14,7 @@ export class CheshireEastClient {
         const binCollectionData: BinCollectionData[] = await this.getBinDataFromWebService(propertyId);
         
         console.log("Bin collection data from webservice: " + JSON.stringify(binCollectionData));
-        return new PropertyData(encodeURIComponent(address.addressLine1), propertyId, binCollectionData);
+        return new PropertyData(encodeURIComponent(address.addressLine1) + ":" + address.postCode, propertyId, binCollectionData);
     }
     
     async getPropertyIdFromWebservice(address: ShortAddress): Promise<string> {

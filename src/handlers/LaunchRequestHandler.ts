@@ -58,7 +58,7 @@ export class LaunchRequestHandler implements RequestHandler {
             "Please check the address assigned to your Alexa device is a valid Cheshire East address.");
         }
 
-        const shortAddress = new ShortAddress(address.addressLine1, address.postalCode);
+        const shortAddress = new ShortAddress(address.addressLine1.toUpperCase(), address.postalCode.toUpperCase());
 
         return shortAddress;
     }
@@ -69,7 +69,7 @@ export class LaunchRequestHandler implements RequestHandler {
         let propertyData: PropertyData = null;
 
         try {
-            propertyData = await getPropertyDataFromDatabase(urlEncodedAddressLine1);
+            propertyData = await getPropertyDataFromDatabase(urlEncodedAddressLine1, address.postCode);
         } catch(err) {
             console.error("Error attempting to obtain data from database", err);
         }
@@ -123,10 +123,10 @@ export class LaunchRequestHandler implements RequestHandler {
                 "Please check the address assigned to your Alexa device is a valid Cheshire East address.");
     }
 
-    async function getPropertyDataFromDatabase(addressLine1: string): Promise<PropertyData> {
+    async function getPropertyDataFromDatabase(addressLine1: string, postalCode: string): Promise<PropertyData> {
         const params = {
             Key: {
-                'addressLine1': addressLine1,
+                'addressLine1': addressLine1 + ":" + postalCode,
             },
             TableName: process.env.DYNAMODB_TABLE
         };
