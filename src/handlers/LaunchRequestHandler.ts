@@ -9,7 +9,7 @@ import { ShortAddress } from "../models/ShortAddress";
 
 const PERMISSIONS = ['read::alexa:device:all:address'];
 
-const BIN_DATE_FORMAT = "dd/MM/yyyy";
+const BIN_DATE_FORMAT = "DD/MM/YYYY";
 
 const dynamoDB = new DynamoDB.DocumentClient();
 
@@ -97,10 +97,25 @@ export class LaunchRequestHandler implements RequestHandler {
             binType = binCollectionData[0].binType;
         }
 
-        const returnString: string = "Your " + binType + " bin is due on " + binCollectionData[0].collectionDay + ".";
+        const returnString: string = "Your " + binType + " bin is due " + findCollectionDay(binCollectionData[0]) + ".";
         console.info("Responding with:" + returnString);
 
         return returnString;
+    }
+
+    function findCollectionDay(binCollectionData: BinCollectionData) {
+        const date = moment(binCollectionData.collectionDate, BIN_DATE_FORMAT);
+        const now = moment();
+
+        if (now.isSame(date, 'day')) {
+            return "Today";
+        }
+
+        if (now.add(1, 'day').isSame(date, 'day')) {
+            return "Tomorrow";
+        }
+
+        return "on " + binCollectionData.collectionDay;
     }
 
     function createBinCollectionException(): Error {
@@ -173,8 +188,10 @@ export class LaunchRequestHandler implements RequestHandler {
         
         const nextCollectionData: BinCollectionData[] = [];
 
+        const now = moment();
+
         for (const item of propertyData.binCollectionData) {
-            if (moment(item.collectionDate).isAfter(moment())) {
+            if (moment(item.collectionDate, BIN_DATE_FORMAT).isSameOrAfter(now, 'day')) {
                 if (propertyData.binCollectionData.length - counter <= 3 && !refreshed) {
                     console.log("Not much bin data in database, refreshing");
                     refreshBinData(propertyData);
