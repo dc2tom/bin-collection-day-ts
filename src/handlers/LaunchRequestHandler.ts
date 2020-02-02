@@ -1,19 +1,19 @@
 import { HandlerInput, RequestHandler, ResponseBuilder } from "ask-sdk";
 import { Response, services } from "ask-sdk-model";
-import { DynamoDB } from "aws-sdk";
 import * as moment from 'moment';
 import { PropertyData } from '../models/PropertyData';
 import { BinCollectionData } from '../models/BinCollectionData';
 import { CheshireEastClient } from "./business-logic/CheshireEastClient";
+import { DynamoDBDao } from "./dao/DynamoDBDao";
 import { ShortAddress } from "../models/ShortAddress";
 
 const PERMISSIONS = ['read::alexa:device:all:address'];
 
 const BIN_DATE_FORMAT = "DD/MM/YYYY";
 
-const dynamoDB = new DynamoDB.DocumentClient();
-
 const cheshireEastClient = new CheshireEastClient();
+
+const dao = new DynamoDBDao();
 
 export class LaunchRequestHandler implements RequestHandler {
     canHandle(handlerInput: HandlerInput): boolean {
@@ -69,16 +69,16 @@ export class LaunchRequestHandler implements RequestHandler {
         let propertyData: PropertyData = null;
 
         try {
-            propertyData = await getPropertyDataFromDatabase(urlEncodedAddressLine1, address.postCode);
+            propertyData = await dao.getPropertyDataFromDatabase(urlEncodedAddressLine1, address.postCode);
         } catch(err) {
             console.error("Error attempting to obtain data from database", err);
         }
 
         if (propertyData === null) {
-            console.log("No bin data from in database for this property, trying webservice");
+            console.log("No valid bin data found in database for this property, trying webservice");
             propertyData = await cheshireEastClient.getPropertyDataFromWebservice(address);
             if (propertyData !== null) {
-                await putPropertyDataInDatabase(propertyData);
+                await dao.putPropertyDataInDatabase(propertyData);
             } else {
                 throw createBinCollectionException();
             }
@@ -123,68 +123,8 @@ export class LaunchRequestHandler implements RequestHandler {
                 "Please check the address assigned to your Alexa device is a valid Cheshire East address.");
     }
 
-    async function getPropertyDataFromDatabase(addressLine1: string, postalCode: string): Promise<PropertyData> {
-        const params = {
-            Key: {
-                'addressLine1': addressLine1 + ":" + postalCode,
-            },
-            TableName: process.env.DYNAMODB_TABLE
-        };
-
-        console.log('Trying database lookup using params: ' + JSON.stringify(params));
-
-        let data = null;
-
-        try {
-            data = await dynamoDB.get(params).promise();
-            console.log("data from database: " + JSON.stringify(data));
-        } catch (err) {
-            console.error("Dynamo DB client error.", err);
-        }
-
-        let propertyDataToReturn: PropertyData = null;
-
-        if (data.Item && data.Item.propertyId) {
-            console.log("Found propertyId in database: " + data.Item.propertyId);
-            if (data.Item.binCollectionData !== null) {
-                console.log("Found bin collection data in database.");
-                const binCollectionDataList: BinCollectionData[] = JSON.parse(data.Item.binCollectionData);
-
-                propertyDataToReturn = new PropertyData(addressLine1, data.Item.propertyId, binCollectionDataList);
-            }
-        }
-
-        if (propertyDataToReturn === null) {
-            console.log("No data found in database for this property.");
-        }
-
-        return propertyDataToReturn;
-    }
-
-    async function putPropertyDataInDatabase(propertyData: PropertyData) {
-        console.log("Writing bin data to database.");
-
-        const params = {
-            Item: {
-                'addressLine1': propertyData.addressLine1,
-                'binCollectionData': JSON.stringify(propertyData.binCollectionData),
-                'propertyId': propertyData.propertyId,
-            },
-            TableName: process.env.DYNAMODB_TABLE
-          };
-
-        try {
-            await dynamoDB.put(params).promise();
-            console.log("Bin data written to database");
-        } catch (err) {
-            console.error("Dynamo DB client error.", err);
-        }
-    }
-
     function findNextBinCollectionData(propertyData: PropertyData): BinCollectionData[] {
         console.log("Finding next bin collection date");
-        let counter = 1;
-        let refreshed = false;
         
         const nextCollectionData: BinCollectionData[] = [];
 
@@ -192,11 +132,6 @@ export class LaunchRequestHandler implements RequestHandler {
 
         for (const item of propertyData.binCollectionData) {
             if (moment(item.collectionDate, BIN_DATE_FORMAT).isSameOrAfter(now, 'day')) {
-                if (propertyData.binCollectionData.length - counter <= 3 && !refreshed) {
-                    console.log("Not much bin data in database, refreshing");
-                    refreshBinData(propertyData);
-                    refreshed = true;
-                }
                 if (nextCollectionData.length === 1) {
                     // Does next bin in the collection belong with the one we are returning?
                     if (matchesExistingDate(nextCollectionData[0].collectionDate, item.collectionDate)) {
@@ -204,7 +139,8 @@ export class LaunchRequestHandler implements RequestHandler {
                         nextCollectionData.push(item);
                         break;
                     } else {
-                        // We only have one bin to return
+                        // We only have one bin to return. 
+                        // This happens in the winter when the Green bin isn't collected.
                         break;
                     }
                 }
@@ -220,7 +156,6 @@ export class LaunchRequestHandler implements RequestHandler {
                         nextCollectionData.push(item);
                     }
                 }
-                counter++;
             }
         }
 
@@ -234,9 +169,4 @@ export class LaunchRequestHandler implements RequestHandler {
 
     function matchesExistingDate(existingDate: string, newDate: string): boolean {
         return moment(existingDate, BIN_DATE_FORMAT).isSame(moment(newDate, BIN_DATE_FORMAT));
-    }
-
-    async function refreshBinData(propertyData: PropertyData): Promise<void> {
-        const binCollectionData: BinCollectionData[] = await cheshireEastClient.getBinDataFromWebService(propertyData.propertyId);
-        await putPropertyDataInDatabase(new PropertyData(propertyData.addressLine1, propertyData.propertyId, binCollectionData));
     }

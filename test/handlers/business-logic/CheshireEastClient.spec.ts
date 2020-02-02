@@ -1,18 +1,15 @@
 import { mocked } from 'ts-jest/utils'
 import { services } from "ask-sdk-model";
-import Address = services.deviceAddress.Address;
+import {ShortAddress} from '../../../src/models/ShortAddress';
 import {CheshireEastClient} from '../../../src/handlers/business-logic/CheshireEastClient';
 
 test('test1', () => {
-    let testSubject = new CheshireEastClient();
+    const testSubject = new CheshireEastClient();
 
-    let address: Address = {
-        addressLine1 : "",
-        postalCode : ""
-    }
+    const address = new ShortAddress("Test", "SK11 3AB");
 
-    let result = testSubject.getPropertyIdFromWebservice(address);
+    const result = testSubject.getPropertyIdFromWebservice(address);
 
     console.log("Property ID is : " + result);
 
-}, 500);
+});
