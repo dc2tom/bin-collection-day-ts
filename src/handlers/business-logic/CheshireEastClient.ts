@@ -75,7 +75,7 @@ export class CheshireEastClient {
                 }
             }
         });
-        
+
         console.log("Got bin data response from cheshire east, parsing it.");
         binCollectionData = this.parseBinResponse(serviceResponse);
 

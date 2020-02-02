@@ -161,7 +161,7 @@ export class LaunchRequestHandler implements RequestHandler {
 
         if (nextCollectionData.length === 0) {
             console.error("No valid stored bin collection data found for this property.");
-            createBinCollectionException();
+            throw createBinCollectionException();
         }
 
         return nextCollectionData;

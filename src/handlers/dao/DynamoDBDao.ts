@@ -56,8 +56,10 @@ export class DynamoDBDao {
         const now = moment();
 
         const filteredCollectionData: BinCollectionData[] = binCollectionData.filter(item => {
-            this.collectionIsTodayOrLater(now, item);
+            return this.collectionIsTodayOrLater(now, item);
         });
+
+        console.log("Filtered bin collection data length is " + filteredCollectionData.length);
 
         if (filteredCollectionData.length <= 3) {
             return true;
