@@ -15,25 +15,25 @@
   "license": "ISC",
   "dependencies": {
     "@types/request-promise-native": "^1.0.17",
-    "ask-sdk": "^2.7.0",
-    "ask-sdk-model": "^1.18.0",
+    "ask-sdk": "^2.8.0",
+    "ask-sdk-model": "^1.28.0",
     "moment": "^2.24.0",
-    "request": "^2.88.0",
-    "request-promise-native": "^1.0.7"
+    "request": "^2.88.2",
+    "request-promise-native": "^1.0.8"
   },
   "devDependencies": {
-    "@types/aws-lambda": "^8.10.31",
-    "@types/jest": "^24.0.23",
-    "@types/node": "^10.14.15",
+    "@types/aws-lambda": "^8.10.47",
+    "@types/jest": "^24.9.1",
+    "@types/node": "^10.17.18",
     "jest": "^24.9.0",
     "repack": "0.0.1",
-    "repack-zip": "^0.2.5",
+    "repack-zip": "^0.2.8",
     "rimraf": "^2.6.3",
-    "ts-jest": "^24.2.0",
-    "ts-node": "^8.3.0",
-    "tslint": "^5.18.0",
+    "ts-jest": "^24.3.0",
+    "ts-node": "^8.8.2",
+    "tslint": "^5.20.1",
     "tslint-microsoft-contrib": "^6.2.0",
     "tslint-sonarts": "^1.9.0",
-    "typescript": "^3.7.3"
+    "typescript": "^3.8.3"
   }
 }
