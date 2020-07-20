@@ -29,4 +29,6 @@ jobs:
       uses: actions/upload-artifact@v1.0.0
       with:
         name: bin-collection-day-ts
-        path: lambda.zip
+        path: |
+          lambda.zip
+          package-lock.json
