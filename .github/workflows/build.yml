@@ -26,7 +26,9 @@ jobs:
     - run: npm install
     - run: npm run-script build
     - name: Upload artifact
-      uses: actions/upload-artifact@v1.0.0
+      uses: actions/upload-artifact@v2
       with:
         name: bin-collection-day-ts
-        path: lambda.zip
+        path: |
+          lambda.zip
+          package-lock.json
